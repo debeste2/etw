@@ -1,0 +1,900 @@
+wait(3)
+-- =========================
+-- EAT THE WORLD BOT - OPTIMIZED
+-- =========================
+
+repeat task.wait() until game:IsLoaded()
+
+-- =========================
+-- SERVICES
+-- =========================
+local RS = game:GetService("ReplicatedStorage")
+local player = game.Players.LocalPlayer
+
+-- =========================
+-- ANTI-AFK
+-- =========================
+local vu = game:GetService("VirtualUser")
+player.Idled:Connect(function()
+    vu:Button2Down(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
+    task.wait()
+    vu:Button2Up(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
+end)
+
+-- =========================
+-- SET QUALITY TO LOWEST
+-- =========================
+pcall(function()
+    settings().Rendering.QualityLevel = Enum.QualityLevel.Level01
+end)
+
+-- =========================
+-- WAIT FOR CHARACTER
+-- =========================
+repeat task.wait() until player.Character
+repeat task.wait() until player.Character:FindFirstChild("HumanoidRootPart")
+
+-- =========================
+-- HELPERS
+-- =========================
+local function getRoot()
+    local char = player.Character
+    return char and (char:FindFirstChild('HumanoidRootPart') or char:FindFirstChild('Torso'))
+end
+
+local function extractNumber(text)
+    if not text then return 0 end
+    local numStr = text:gsub(",", ""):match("%d+")
+    return tonumber(numStr) or 0
+end
+
+local PICKUP_ANIM_ID = "16493266847"
+
+local function isPickupAnimationPlaying(char)
+    local humanoid = char and char:FindFirstChildOfClass("Humanoid")
+    if not humanoid then
+        return false
+    end
+
+    for _, track in ipairs(humanoid:GetPlayingAnimationTracks()) do
+        local anim = track.Animation
+        local animId = anim and anim.AnimationId or ""
+        if animId ~= "" and string.find(animId, PICKUP_ANIM_ID, 1, true) then
+            return true
+        end
+    end
+
+    return false
+end
+
+-- =========================
+-- CLICK HELPER
+-- =========================
+local VirtualInputManager = game:GetService("VirtualInputManager")
+
+local function clickPosition(normalizedPos, clickCount)
+    clickCount = clickCount or 10
+    local screenSize = workspace.CurrentCamera.ViewportSize
+    local screenX = normalizedPos.X * screenSize.X
+    local screenY = normalizedPos.Y * screenSize.Y
+    
+    for i = 1, clickCount do
+        VirtualInputManager:SendMouseButtonEvent(screenX, screenY, 0, true, game, 1)
+        task.wait(0.01)
+        VirtualInputManager:SendMouseButtonEvent(screenX, screenY, 0, false, game, 1)
+        task.wait(0.01)
+    end
+end
+
+-- =========================
+-- CRATE COLLECTION (after 1h 30m)
+-- =========================
+local cratesCollected = false
+
+local function collectCratesAndRejoin()
+    if cratesCollected then return end
+    cratesCollected = true
+    
+    print("[Bot] 1h 30m reached - Collecting crates...")
+    
+    -- Initial click
+    print("[Bot] Clicking initial position")
+    clickPosition(Vector2.new(0.728906, 0.279167), 5)
+    task.wait(3)
+    
+    -- Stars (click once)
+    print("[Bot] Clicking Stars")
+    clickPosition(Vector2.new(0.037370, 0.534722), 1)
+    task.wait(0.5)
+    
+    -- Spin (click once)
+    print("[Bot] Clicking Spin")
+    clickPosition(Vector2.new(0.328125, 0.860417), 1)
+    print("[Bot] Waiting 8 seconds for spin to finish...")
+    task.wait(8)
+    
+    -- All Crates (click once each, wait 4 seconds between)
+    local cratePositions = {
+        -- Row 1
+        Vector2.new(0.566927, 0.371065),
+        Vector2.new(0.661719, 0.390509),
+        Vector2.new(0.758333, 0.371065),
+        -- Row 2
+        Vector2.new(0.564193, 0.534722),
+        Vector2.new(0.658984, 0.533102),
+        Vector2.new(0.758333, 0.542824),
+        -- Row 3
+        Vector2.new(0.562370, 0.703241),
+        Vector2.new(0.657161, 0.701620),
+        Vector2.new(0.780208, 0.667593),
+    }
+    
+    for i, pos in ipairs(cratePositions) do
+        print("[Bot] Clicking crate " .. i .. "/" .. #cratePositions)
+        clickPosition(pos, 1)
+        task.wait(4)
+    end
+    
+    print("[Bot] Selling...")
+    local char = player.Character
+    if char then
+        local events = char:FindFirstChild("Events")
+        if events then
+            local sellEvent = events:FindFirstChild("Sell")
+            if sellEvent then
+                sellEvent:FireServer()
+            end
+        end
+    end
+    
+    task.wait(2)
+    
+    print("[Bot] Teleporting to Normal server...")
+    game:GetService("ReplicatedStorage").Events.RequestTeleport:FireServer("Normal")
+end
+
+-- =========================
+-- STATISTICS
+-- =========================
+local stats = {
+    startTime = tick(),
+    timesSold = 0,
+    currentCubes = 0,
+    nextUpgrade = "Calculating...",
+    maxSize = 0,
+    currentSize = 0,
+    sizeLevel = 0,
+    multiplierLevel = 0,
+    speedLevel = 0
+}
+
+-- Statistics GUI
+local statsGui = Instance.new("ScreenGui")
+statsGui.Name = "StatsGui"
+statsGui.ResetOnSpawn = false
+statsGui.Parent = player.PlayerGui
+
+local statsFrame = Instance.new("Frame")
+statsFrame.Size = UDim2.new(0, 280, 0, 180)
+statsFrame.Position = UDim2.new(1, -290, 0.5, -90)
+statsFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+statsFrame.BackgroundTransparency = 0.2
+statsFrame.BorderSizePixel = 2
+statsFrame.BorderColor3 = Color3.fromRGB(60, 60, 60)
+statsFrame.Parent = statsGui
+
+local statsText = Instance.new("TextLabel")
+statsText.Size = UDim2.new(1, -10, 1, -10)
+statsText.Position = UDim2.new(0, 5, 0, 5)
+statsText.BackgroundTransparency = 1
+statsText.Text = ""
+statsText.TextColor3 = Color3.fromRGB(255, 255, 255)
+statsText.TextSize = 13
+statsText.Font = Enum.Font.Code
+statsText.TextXAlignment = Enum.TextXAlignment.Left
+statsText.TextYAlignment = Enum.TextYAlignment.Top
+statsText.TextWrapped = true
+statsText.Parent = statsFrame
+
+local function updateStats()
+    local elapsed = tick() - stats.startTime
+    local hours = math.floor(elapsed / 3600)
+    local minutes = math.floor((elapsed % 3600) / 60)
+    local seconds = math.floor(elapsed % 60)
+    
+    local sizePercent = 0
+    if stats.maxSize > 0 then
+        sizePercent = math.floor((stats.currentSize / stats.maxSize) * 100)
+    end
+    
+    statsText.Text = string.format([[Time Played: %dh %dm %ds
+Times Sold: %d
+Current Cubes: %s
+Next Upgrade: %s
+Max Size: %d
+Current Size: %d (%d%%)
+Levels:
+  Size: %d
+  Multiplier: %d
+  Speed: %d]], 
+        hours, minutes, seconds,
+        stats.timesSold,
+        tostring(stats.currentCubes),
+        stats.nextUpgrade,
+        stats.maxSize,
+        stats.currentSize,
+        sizePercent,
+        stats.sizeLevel,
+        stats.multiplierLevel,
+        stats.speedLevel
+    )
+end
+
+-- Update stats display every second
+task.spawn(function()
+    while true do
+        updateStats()
+        
+        -- Check if 1h 31m (5460 seconds) has passed
+        local elapsed = tick() - stats.startTime
+        if elapsed >= 5460 and not cratesCollected then
+            collectCratesAndRejoin()
+        end
+        task.wait(1)
+    end
+end)
+
+-- =========================
+-- CHECK FOR MEGA MAPS
+-- =========================
+local megaMapsText = nil
+local screenGui = player.PlayerGui:FindFirstChild("ScreenGui")
+
+if screenGui then
+    -- Try direct path first
+    local megaMaps = screenGui:FindFirstChild("MegaMaps")
+    if megaMaps then
+        local textLabel = megaMaps:FindFirstChild("TextLabel")
+        if textLabel then
+            megaMapsText = textLabel.Text
+        end
+    else
+        -- Try nested Players path
+        local playersFolder = screenGui:FindFirstChild("Players")
+        if playersFolder then
+            local playerFolder = playersFolder:FindFirstChild(player.Name)
+            if playerFolder then
+                local playerScreenGui = playerFolder:FindFirstChild("ScreenGui")
+                if playerScreenGui then
+                    megaMaps = playerScreenGui:FindFirstChild("MegaMaps")
+                    if megaMaps then
+                        local textLabel = megaMaps:FindFirstChild("TextLabel")
+                        if textLabel then
+                            megaMapsText = textLabel.Text
+                        end
+                    end
+                end
+            end
+        end
+    end
+end
+
+if megaMapsText and megaMapsText == "MEGA MAPS" then
+    RS.Events.RequestTeleport:FireServer("Mega")
+end
+
+-- =========================
+-- WAIT FOR CORRECT MAP
+-- =========================
+local function getMapName()
+    local success, mapName = pcall(function()
+        -- Try direct ScreenGui path first
+        local screenGui = player.PlayerGui:FindFirstChild("ScreenGui")
+        if screenGui then
+            local mapCountdown = screenGui:FindFirstChild("MapCountdown")
+            if mapCountdown then
+                local mapNameLabel = mapCountdown:FindFirstChild("MapName")
+                if mapNameLabel then
+                    return mapNameLabel.Text
+                end
+            end
+        end
+        
+        -- Try nested Players path
+        return player.PlayerGui.Players[player.Name].ScreenGui.MapCountdown.MapName.Text
+    end)
+    
+    return success and mapName or nil
+end
+
+local function checkMapVoteButtons()
+    local success, result = pcall(function()
+        -- Try direct ScreenGui path first
+        local screenGui = player.PlayerGui:FindFirstChild("ScreenGui")
+        local mapVote = nil
+        
+        if screenGui then
+            mapVote = screenGui:FindFirstChild("MapVote")
+        end
+        
+        -- Try nested Players path if not found
+        if not mapVote then
+            local playersFolder = player.PlayerGui:FindFirstChild("Players")
+            if playersFolder then
+                local playerFolder = playersFolder:FindFirstChild(player.Name)
+                if playerFolder then
+                    local playerScreenGui = playerFolder:FindFirstChild("ScreenGui")
+                    if playerScreenGui then
+                        mapVote = playerScreenGui:FindFirstChild("MapVote")
+                    end
+                end
+            end
+        end
+        
+        if not mapVote then return nil end
+        
+        local mapButtons = mapVote:FindFirstChild("MapButtons")
+        if not mapButtons then return nil end
+        
+        -- Check buttons 1, 2, 3
+        for i = 1, 3 do
+            local button = mapButtons:FindFirstChild(tostring(i))
+            if button then
+                local title = button:FindFirstChild("Title")
+                if title and title.Text == "Mega Grid" then
+                    return i
+                end
+            end
+        end
+        
+        return nil
+    end)
+    
+    return success and result or nil
+end
+
+local function voteForMap(buttonNumber)
+    local votePositions = {
+        Vector2.new(0.31780552864074707, 0.5409272909164429),
+        Vector2.new(0.34932172298431396, 0.44075557589530945),
+        Vector2.new(0.2276337891817093, 0.37063536047935486)
+    }
+    
+    pcall(function()
+        RS:WaitForChild("Events"):WaitForChild("MapVote"):FireServer(buttonNumber, votePositions[buttonNumber])
+    end)
+end
+
+local function setMapTime()
+    pcall(function()
+        local args = {
+            {
+                MapTime = 3
+            }
+        }
+        RS:WaitForChild("Events"):WaitForChild("SetServerSettings"):FireServer(unpack(args))
+    end)
+end
+
+local function waitForCorrectMap()
+    while true do
+        local mapName = getMapName()
+        
+        if mapName then
+            if mapName == "Loading next map..." then
+                task.wait(1)
+            elseif mapName == "Mega Grid" then
+                return true
+            else
+                setMapTime()
+                task.wait(0.5)
+                
+                local megaGridButton = checkMapVoteButtons()
+                if megaGridButton then
+                    voteForMap(megaGridButton)
+                end
+                
+                while true do
+                    mapName = getMapName()
+                    if mapName == "Loading next map..." then
+                        task.wait(2)
+                        while getMapName() == "Loading next map..." do
+                            task.wait(1)
+                        end
+                        break
+                    end
+                    task.wait(1)
+                end
+            end
+        else
+            task.wait(1)
+        end
+    end
+end
+
+waitForCorrectMap()
+
+-- =========================
+-- SETUP MAP: PAUSE TIME & DESTROY OBSTACLES
+-- =========================
+pcall(function()
+    local args = {
+        {
+            Paused = true
+        }
+    }
+    RS:WaitForChild("Events"):WaitForChild("SetServerSettings"):FireServer(unpack(args))
+end)
+
+pcall(function()
+    if workspace:FindFirstChild("Map") then
+        local map = workspace.Map
+        if map:FindFirstChild("Buildings") then
+            map.Buildings:Destroy()
+        end
+        
+        if map:FindFirstChild("Fragmentable") then
+            for _, obj in ipairs(map.Fragmentable:GetDescendants()) do
+                if obj:IsA("Model") and obj.Name == "Smooth Block Model" then
+                    obj:Destroy()
+                end
+            end
+        end
+    end
+end)
+
+-- =========================
+-- REMOVE CUBE VISUALS (FIX DECAL ERROR)
+-- =========================
+pcall(function()
+    for _, cube in ipairs(workspace:GetDescendants()) do
+        if cube.Name == "Cube" and cube:IsA("Model") then
+            local visual = cube:FindFirstChild("Visual")
+            if visual then
+                visual:Destroy()
+            end
+        end
+    end
+end)
+
+-- Listen for new cubes and destroy their visuals
+workspace.DescendantAdded:Connect(function(descendant)
+    pcall(function()
+        if descendant.Name == "Cube" and descendant:IsA("Model") then
+            task.wait(0.1)
+            local visual = descendant:FindFirstChild("Visual")
+            if visual then
+                visual:Destroy()
+            end
+        end
+    end)
+end)
+
+-- =========================
+-- AUTO FUNCTIONS
+-- =========================
+local autoEating = false
+local autoGrabbing = false
+
+local function startAutoEat()
+    if autoEating then return end
+    autoEating = true
+    
+    task.spawn(function()
+        while autoEating do
+            pcall(function()
+                local char = player.Character
+                if char then
+                    local events = char:FindFirstChild("Events")
+                    if events then
+                        local eatEvent = events:FindFirstChild("Eat")
+                        if eatEvent then
+                            eatEvent:FireServer()
+                        end
+                    end
+                end
+            end)
+            task.wait(0.01)
+        end
+    end)
+end
+
+local function startAutoGrab()
+    if autoGrabbing then return end
+    autoGrabbing = true
+end
+
+local function doGrab()
+    if not autoGrabbing then return end
+    
+    pcall(function()
+        local char = player.Character
+        if char then
+            local events = char:FindFirstChild("Events")
+            if events then
+                local grabEvent = events:FindFirstChild("Grab")
+                if grabEvent then
+                    grabEvent:FireServer(false, false, false)
+                end
+            end
+        end
+    end)
+end
+
+-- =========================
+-- UPGRADE LOGIC
+-- =========================
+local function getUpgradeInfo()
+    local success, upgradeType, cost = pcall(function()
+        local upgrades = player:FindFirstChild("Upgrades")
+        local gui = player.PlayerGui:FindFirstChild("ScreenGui")
+        
+        if not upgrades or not gui then return nil end
+        
+        local maxSizeValue = upgrades:FindFirstChild("MaxSize")
+        local multiplierValue = upgrades:FindFirstChild("Multiplier")
+        local eatSpeedValue = upgrades:FindFirstChild("EatSpeed")
+        
+        if not maxSizeValue or not multiplierValue or not eatSpeedValue then return nil end
+        
+        local currentMaxSize = maxSizeValue.Value
+        local currentMultiplier = multiplierValue.Value
+        local currentEatSpeed = eatSpeedValue.Value
+        
+        -- Update stats (sizeLevel is the level, not the actual max size)
+        stats.sizeLevel = currentMaxSize
+        stats.multiplierLevel = currentMultiplier
+        stats.speedLevel = currentEatSpeed
+        
+        -- Get current cubes
+        local cubesText = gui:FindFirstChild("Shop")
+        if cubesText then
+            cubesText = cubesText:FindFirstChild("CubeFrame")
+            if cubesText then
+                cubesText = cubesText:FindFirstChild("CounterFrame")
+                if cubesText then
+                    cubesText = cubesText:FindFirstChild("Cubes")
+                    if cubesText then
+                        stats.currentCubes = extractNumber(cubesText.Text)
+                    end
+                end
+            end
+        end
+        
+        -- Target ratios: Multiplier = MaxSize/5, EatSpeed = Multiplier/2
+        local targetMultiplier = math.floor(currentMaxSize / 5)
+        local targetEatSpeed = math.floor(currentMultiplier / 2)
+        
+        -- Get upgrade costs
+        local shopFrames = gui.Shop:FindFirstChild("ShopFrames")
+        if not shopFrames then return nil end
+        
+        local upgradeList = shopFrames:FindFirstChild("Upgrades")
+        if not upgradeList then return nil end
+        upgradeList = upgradeList:FindFirstChild("UpgradeList")
+        if not upgradeList then return nil end
+        
+        -- Priority order: Speed -> Multiplier -> MaxSize
+        if currentEatSpeed < targetEatSpeed then
+            local eatSpeedFrame = upgradeList:FindFirstChild("EatSpeed")
+            if eatSpeedFrame then
+                local buyFrame = eatSpeedFrame:FindFirstChild("BuyFrame")
+                if buyFrame then
+                    local priceLabel = buyFrame:FindFirstChild("Price")
+                    if priceLabel then
+                        local cost = extractNumber(priceLabel.Text)
+                        stats.nextUpgrade = string.format("Speed %d (%d cubes)", currentEatSpeed + 1, cost)
+                        if stats.currentCubes >= cost then
+                            return "EatSpeed", cost
+                        end
+                    end
+                end
+            end
+        elseif currentMultiplier < targetMultiplier then
+            local multiplierFrame = upgradeList:FindFirstChild("Multiplier")
+            if multiplierFrame then
+                local buyFrame = multiplierFrame:FindFirstChild("BuyFrame")
+                if buyFrame then
+                    local priceLabel = buyFrame:FindFirstChild("Price")
+                    if priceLabel then
+                        local cost = extractNumber(priceLabel.Text)
+                        stats.nextUpgrade = string.format("Multiplier %d (%d cubes)", currentMultiplier + 1, cost)
+                        if stats.currentCubes >= cost then
+                            return "Multiplier", cost
+                        end
+                    end
+                end
+            end
+        else
+            local maxSizeFrame = upgradeList:FindFirstChild("MaxSize")
+            if maxSizeFrame then
+                local buyFrame = maxSizeFrame:FindFirstChild("BuyFrame")
+                if buyFrame then
+                    local priceLabel = buyFrame:FindFirstChild("Price")
+                    if priceLabel then
+                        local cost = extractNumber(priceLabel.Text)
+                        stats.nextUpgrade = string.format("Size %d (%d cubes)", currentMaxSize + 1, cost)
+                        if stats.currentCubes >= cost then
+                            return "MaxSize", cost
+                        end
+                    end
+                end
+            end
+        end
+        
+        return nil
+    end)
+    
+    if success and upgradeType then
+        return upgradeType, cost
+    end
+    return nil
+end
+
+local lastUpgradeTime = 0
+local lastUpgradeType = nil
+
+local function tryUpgrade()
+    -- Debounce: only fire upgrade once per second
+    if tick() - lastUpgradeTime < 1 then return end
+    
+    local upgradeType, cost = getUpgradeInfo()
+    if upgradeType then
+        lastUpgradeTime = tick()
+        lastUpgradeType = upgradeType
+        pcall(function()
+            RS:WaitForChild("Events"):WaitForChild("PurchaseEvent"):FireServer(upgradeType)
+        end)
+    end
+end
+
+-- =========================
+-- MAIN FARMING LOOP
+-- =========================
+local function mainLoop()
+    startAutoEat()
+    startAutoGrab()
+    
+    local currentZ = -1250
+    local lastSellTime = 0
+    local lastSellVisible = false
+    
+    while true do
+        pcall(function()
+            for x = -1449, 1349,118 do
+                local hrp = getRoot()
+                if hrp then
+                    hrp.CFrame = CFrame.new(x, 59, currentZ)
+                    
+                    -- Apply downward momentum for 1 full second
+                    local momentumStart = tick()
+                    while tick() - momentumStart < 1 do
+                        local hrp = getRoot()
+                        if hrp then
+                            hrp.AssemblyLinearVelocity = Vector3.new(0, -150, 0)
+                            hrp.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
+                        end
+                        task.wait(0.05)
+                    end
+                    
+                    -- Re-enable autoGrab and autoEat
+                    autoGrabbing = true
+                    autoEating = true
+                    
+                    local lastSize = 0
+                    local lastSizeChangeTime = tick()
+                    local pickupStartTime = 0
+                    local lastPickupSeenTime = tick()
+                    local pendingSell = false
+                    local sellFired = false
+                    local leaderstats = player:FindFirstChild("leaderstats")
+                    if leaderstats then
+                        local sizeValue = leaderstats:FindFirstChild("Size")
+                        if sizeValue then
+                            lastSize = sizeValue.Value
+                        end
+                    end
+                    
+                    while true do
+                        -- Update stats and try upgrades every frame
+                        tryUpgrade()
+                        updateStats()
+                        
+                        -- Touch all cubes in workspace
+                        pcall(function()
+                            local hrp = getRoot()
+                            if hrp then
+                                for _, cube in ipairs(workspace:GetChildren()) do
+                                    if cube.Name == "Cube" and cube:IsA("BasePart") then
+                                        firetouchinterest(hrp, cube, 0)
+                                        firetouchinterest(hrp, cube, 1)
+                                    end
+                                end
+                            end
+                        end)
+                        
+                        -- Check current size
+                        local currentSize = 0
+                        leaderstats = player:FindFirstChild("leaderstats")
+                        if leaderstats then
+                            local sizeValue = leaderstats:FindFirstChild("Size")
+                            if sizeValue then
+                                currentSize = sizeValue.Value
+                                stats.currentSize = currentSize
+                            end
+                        end
+
+                        local char = player.Character
+                        local pickupPlaying = isPickupAnimationPlaying(char)
+                        
+                        if currentSize > lastSize then
+                            lastSize = currentSize
+                            lastSizeChangeTime = tick()
+                        end
+
+                        if pickupPlaying then
+                            if pickupStartTime == 0 then
+                                pickupStartTime = tick()
+                            end
+                            lastPickupSeenTime = tick()
+                        else
+                            pickupStartTime = 0
+                        end
+                        
+                        -- If stuck (no size increase or pickup animation stuck), pause autoGrab and teleport
+                        if (not pickupPlaying and tick() - lastSizeChangeTime >= 6) or (pickupStartTime > 0 and tick() - pickupStartTime >= 6) then
+                            print("[Bot] Stuck - pausing autoGrab and moving to next position")
+                            autoGrabbing = false
+                            break
+                        end
+
+                        -- If grabbing but never entering pickup animation, treat as stuck
+                        if not pendingSell and autoGrabbing and not pickupPlaying and tick() - lastPickupSeenTime >= 6 then
+                            print("[Bot] Stuck - no pickup animation detected")
+                            autoGrabbing = false
+                            break
+                        end
+                        
+                        -- Get max size from PlayerGui (try multiple paths)
+                        local maxSize = 0
+                        pcall(function()
+                            -- Try Players nested path first
+                            local players = player.PlayerGui:FindFirstChild("Players")
+                            if players then
+                                local playerFolder = players:FindFirstChild(player.Name)
+                                if playerFolder then
+                                    local screenGui = playerFolder:FindFirstChild("ScreenGui")
+                                    if screenGui then
+                                        local shop = screenGui:FindFirstChild("Shop")
+                                        if shop then
+                                            local shopFrames = shop:FindFirstChild("ShopFrames")
+                                            if shopFrames then
+                                                local upgrades = shopFrames:FindFirstChild("Upgrades")
+                                                if upgrades then
+                                                    local upgradeList = upgrades:FindFirstChild("UpgradeList")
+                                                    if upgradeList then
+                                                        local maxSizeFrame = upgradeList:FindFirstChild("MaxSize")
+                                                        if maxSizeFrame then
+                                                            local upgradeFrame = maxSizeFrame:FindFirstChild("UpgradeFrame")
+                                                            if upgradeFrame then
+                                                                local amount = upgradeFrame:FindFirstChild("Amount")
+                                                                if amount and amount.Text then
+                                                                    local val = extractNumber(amount.Text)
+                                                                    if val >= 0 then -- Only use if it's the actual size, not level
+                                                                        maxSize = val
+                                                                    end
+                                                                end
+                                                            end
+                                                        end
+                                                    end
+                                                end
+                                            end
+                                        end
+                                    end
+                                end
+                            end
+                            
+                            -- Try direct ScreenGui path if not found
+                            if maxSize == 0 then
+                                local screenGui = player.PlayerGui:FindFirstChild("ScreenGui")
+                                if screenGui then
+                                    local shop = screenGui:FindFirstChild("Shop")
+                                    if shop then
+                                        local shopFrames = shop:FindFirstChild("ShopFrames")
+                                        if shopFrames then
+                                            local upgrades = shopFrames:FindFirstChild("Upgrades")
+                                            if upgrades then
+                                                local upgradeList = upgrades:FindFirstChild("UpgradeList")
+                                                if upgradeList then
+                                                    local maxSizeFrame = upgradeList:FindFirstChild("MaxSize")
+                                                    if maxSizeFrame then
+                                                        local upgradeFrame = maxSizeFrame:FindFirstChild("UpgradeFrame")
+                                                        if upgradeFrame then
+                                                            local amount = upgradeFrame:FindFirstChild("Amount")
+                                                            if amount and amount.Text then
+                                                                local val = extractNumber(amount.Text)
+                                                                if val >= 0 then
+                                                                    maxSize = val
+                                                                end
+                                                            end
+                                                        end
+                                                    end
+                                                end
+                                            end
+                                        end
+                                    end
+                                end
+                            end
+                            
+                            if maxSize > 0 then
+                                stats.maxSize = maxSize
+                            end
+                        end)
+                        
+                        -- Check if current size is within 5% of max size (or higher)
+                        if maxSize > 0 and currentSize >= maxSize * 0.95 then
+                            -- Stop autoGrab and autoEat and start sell state
+                            if not pendingSell then
+                                print("[Bot] Stopping auto grab/eat - preparing to sell")
+                            end
+                            autoGrabbing = false
+                            autoEating = false
+                            pendingSell = true
+                        end
+
+                        if pendingSell and not sellFired and not pickupPlaying then
+                            -- Sell once
+                            if char then
+                                local events = char:FindFirstChild("Events")
+                                if events then
+                                    local sellEvent = events:FindFirstChild("Sell")
+                                    if sellEvent then
+                                        print("[Bot] Selling! Size: " .. currentSize .. "/" .. maxSize)
+                                        sellEvent:FireServer()
+                                        stats.timesSold = stats.timesSold + 1
+                                        sellFired = true
+                                    end
+                                end
+                            end
+                        end
+
+                        if pendingSell and currentSize == 0 and not pickupPlaying then
+                            print("[Bot] Size confirmed at 0 - moving to next position")
+                            break
+                        end
+                        
+                        if not pendingSell and not pickupPlaying then
+                            -- Grab and Eat
+                            if char then
+                                local events = char:FindFirstChild("Events")
+                                if events then
+                                    local grabEvent = events:FindFirstChild("Grab")
+                                    local eatEvent = events:FindFirstChild("Eat")
+                                    
+                                    if grabEvent then
+                                        grabEvent:FireServer(false, false, false)
+                                    end
+                                    
+                                    if eatEvent then
+                                        eatEvent:FireServer()
+                                    end
+                                end
+                            end
+                        end
+                        
+                        task.wait(0.001)
+                    end
+                end
+            end
+            
+            -- Move to next Z coordinate 
+            currentZ = currentZ + 400
+        end)
+        task.wait(0.1)
+    end
+end
+
+-- =========================
+-- START BOT
+-- =========================
+mainLoop()
