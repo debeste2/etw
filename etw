@@ -118,6 +118,11 @@ local function collectCratesAndRejoin()
         task.wait(4)
     end
     
+    print("[Bot] Stopping autoGrab and autoEat...")
+    autoGrabbing = false
+    autoEating = false
+    task.wait(5)
+    
     print("[Bot] Selling...")
     local char = player.Character
     if char then
@@ -130,7 +135,7 @@ local function collectCratesAndRejoin()
         end
     end
     
-    task.wait(2)
+    task.wait(1)
     
     print("[Bot] Teleporting to Normal server...")
     game:GetService("ReplicatedStorage").Events.RequestTeleport:FireServer("Normal")
@@ -638,7 +643,7 @@ local function mainLoop()
     startAutoEat()
     startAutoGrab()
     
-    local currentZ = -1250
+    local currentZ = -1650
     local lastSellTime = 0
     local lastSellVisible = false
     
