@@ -643,7 +643,7 @@ local function mainLoop()
     startAutoEat()
     startAutoGrab()
     
-    local currentZ = -1650
+    local currentZ = -1250
     local lastSellTime = 0
     local lastSellVisible = false
     
