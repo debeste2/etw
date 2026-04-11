@@ -644,7 +644,7 @@ local function mainLoop()
     
     while true do
         pcall(function()
-            for x = -1449, 1349,118 do
+            for x = -1331, 1349, 168 do
                 local hrp = getRoot()
                 if hrp then
                     hrp.CFrame = CFrame.new(x, 59, currentZ)
@@ -846,7 +846,7 @@ local function mainLoop()
             end
             
             -- Move to next Z coordinate 
-            currentZ = currentZ + 400
+            currentZ = currentZ + 520
         end)
         task.wait(0.1)
     end
