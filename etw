@@ -48,24 +48,7 @@ local function extractNumber(text)
     return tonumber(numStr) or 0
 end
 
-local PICKUP_ANIM_ID = "16493266847"
 
-local function isPickupAnimationPlaying(char)
-    local humanoid = char and char:FindFirstChildOfClass("Humanoid")
-    if not humanoid then
-        return false
-    end
-
-    for _, track in ipairs(humanoid:GetPlayingAnimationTracks()) do
-        local anim = track.Animation
-        local animId = anim and anim.AnimationId or ""
-        if animId ~= "" and string.find(animId, PICKUP_ANIM_ID, 1, true) then
-            return true
-        end
-    end
-
-    return false
-end
 
 -- =========================
 -- CLICK HELPER
@@ -683,10 +666,7 @@ local function mainLoop()
                     
                     local lastSize = 0
                     local lastSizeChangeTime = tick()
-                    local pickupStartTime = 0
-                    local lastPickupSeenTime = tick()
                     local pendingSell = false
-                    local sellFired = false
                     local leaderstats = player:FindFirstChild("leaderstats")
                     if leaderstats then
                         local sizeValue = leaderstats:FindFirstChild("Size")
@@ -724,33 +704,14 @@ local function mainLoop()
                             end
                         end
 
-                        local char = player.Character
-                        local pickupPlaying = isPickupAnimationPlaying(char)
-                        
                         if currentSize > lastSize then
                             lastSize = currentSize
                             lastSizeChangeTime = tick()
                         end
 
-                        if pickupPlaying then
-                            if pickupStartTime == 0 then
-                                pickupStartTime = tick()
-                            end
-                            lastPickupSeenTime = tick()
-                        else
-                            pickupStartTime = 0
-                        end
-                        
-                        -- If stuck (no size increase or pickup animation stuck), pause autoGrab and teleport
-                        if (not pickupPlaying and tick() - lastSizeChangeTime >= 6) or (pickupStartTime > 0 and tick() - pickupStartTime >= 6) then
-                            print("[Bot] Stuck - pausing autoGrab and moving to next position")
-                            autoGrabbing = false
-                            break
-                        end
-
-                        -- If grabbing but never entering pickup animation, treat as stuck
-                        if not pendingSell and autoGrabbing and not pickupPlaying and tick() - lastPickupSeenTime >= 6 then
-                            print("[Bot] Stuck - no pickup animation detected")
+                        -- If stuck (no size increase for 10 seconds), move to next position
+                        if not pendingSell and tick() - lastSizeChangeTime >= 10 then
+                            print("[Bot] Stuck - no size change for 10s, moving to next position")
                             autoGrabbing = false
                             break
                         end
@@ -833,38 +794,35 @@ local function mainLoop()
                         
                         -- Check if current size is within 5% of max size (or higher)
                         if maxSize > 0 and currentSize >= maxSize * 0.95 then
-                            -- Stop autoGrab and autoEat and start sell state
                             if not pendingSell then
-                                print("[Bot] Stopping auto grab/eat - preparing to sell")
+                                print("[Bot] Size full - spam selling")
                             end
                             autoGrabbing = false
                             autoEating = false
                             pendingSell = true
                         end
 
-                        if pendingSell and not sellFired and not pickupPlaying then
-                            -- Sell once
+                        if pendingSell then
+                            -- Spam sell until size reaches 0
+                            local char = player.Character
                             if char then
                                 local events = char:FindFirstChild("Events")
                                 if events then
                                     local sellEvent = events:FindFirstChild("Sell")
                                     if sellEvent then
-                                        print("[Bot] Selling! Size: " .. currentSize .. "/" .. maxSize)
                                         sellEvent:FireServer()
-                                        stats.timesSold = stats.timesSold + 1
-                                        sellFired = true
                                     end
                                 end
                             end
-                        end
-
-                        if pendingSell and currentSize == 0 and not pickupPlaying then
-                            print("[Bot] Size confirmed at 0 - moving to next position")
-                            break
-                        end
-                        
-                        if not pendingSell and not pickupPlaying then
+                            
+                            if currentSize == 0 then
+                                print("[Bot] Sell complete - size is 0")
+                                stats.timesSold = stats.timesSold + 1
+                                break
+                            end
+                        else
                             -- Grab and Eat
+                            local char = player.Character
                             if char then
                                 local events = char:FindFirstChild("Events")
                                 if events then
