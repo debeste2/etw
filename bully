@@ -1,0 +1,558 @@
+repeat task.wait() until game:IsLoaded()
+
+-- =========================
+-- SERVICES
+-- =========================
+local Players = game:GetService("Players")
+local RS = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local player = Players.LocalPlayer
+
+-- =========================
+-- ANTI-AFK
+-- =========================
+local vu = game:GetService("VirtualUser")
+player.Idled:Connect(function()
+    vu:Button2Down(Vector2.new(0, 0), workspace.CurrentCamera.CFrame)
+    task.wait()
+    vu:Button2Up(Vector2.new(0, 0), workspace.CurrentCamera.CFrame)
+end)
+
+-- =========================
+-- WAIT FOR CHARACTER
+-- =========================
+repeat task.wait() until player.Character
+repeat task.wait() until player.Character:FindFirstChild("HumanoidRootPart")
+
+-- =========================
+-- HELPERS
+-- =========================
+local function getRoot()
+    local char = player.Character
+    return char and (char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso"))
+end
+
+local function getHumanoid()
+    local char = player.Character
+    return char and char:FindFirstChildOfClass("Humanoid")
+end
+
+local function getMySize()
+    local ls = player:FindFirstChild("leaderstats")
+    if ls then
+        local s = ls:FindFirstChild("Size")
+        if s then return s.Value end
+    end
+    return 0
+end
+
+local function getPlayerSize(plr)
+    local ls = plr:FindFirstChild("leaderstats")
+    if ls then
+        local s = ls:FindFirstChild("Size")
+        if s then return s.Value end
+    end
+    return 0
+end
+
+local function getPlayerRoot(plr)
+    local char = plr.Character
+    return char and (char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso"))
+end
+
+local function fireGrab()
+    pcall(function()
+        local char = player.Character
+        if char then
+            local events = char:FindFirstChild("Events")
+            if events then
+                local grab = events:FindFirstChild("Grab")
+                if grab then grab:FireServer(false, false, false) end
+            end
+        end
+    end)
+end
+
+local function fireEat()
+    pcall(function()
+        local char = player.Character
+        if char then
+            local events = char:FindFirstChild("Events")
+            if events then
+                local eat = events:FindFirstChild("Eat")
+                if eat then eat:FireServer() end
+            end
+        end
+    end)
+end
+
+local function fireThrow()
+    pcall(function()
+        local char = player.Character
+        if char then
+            local events = char:FindFirstChild("Events")
+            if events then
+                local throw = events:FindFirstChild("Throw")
+                if throw then throw:FireServer() end
+            end
+        end
+    end)
+end
+
+local function fireSell()
+    pcall(function()
+        local char = player.Character
+        if char then
+            local events = char:FindFirstChild("Events")
+            if events then
+                local sell = events:FindFirstChild("Sell")
+                if sell then sell:FireServer() end
+            end
+        end
+    end)
+end
+
+-- =========================
+-- STATE
+-- =========================
+local FARM_SIZE_THRESHOLD = 100000
+local botPhase = "farm" -- "farm" or "bully"
+local botStatus = "idle"
+local selectedTarget = nil -- Player object (manual override)
+local autoTarget = nil    -- Player object (auto highest)
+
+local function getTarget()
+    -- Manual selection takes priority
+    if selectedTarget and selectedTarget.Parent == Players then
+        return selectedTarget
+    end
+    return autoTarget
+end
+
+-- =========================
+-- GUI - STATUS (TOP RIGHT)
+-- =========================
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "BullyBotGui"
+screenGui.ResetOnSpawn = false
+screenGui.Parent = player.PlayerGui
+
+local statusLabel = Instance.new("TextLabel")
+statusLabel.Name = "StatusLabel"
+statusLabel.Size = UDim2.new(0, 200, 0, 36)
+statusLabel.Position = UDim2.new(1, -210, 0, 10)
+statusLabel.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+statusLabel.BackgroundTransparency = 0.3
+statusLabel.BorderSizePixel = 0
+statusLabel.Text = "Status: idle"
+statusLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+statusLabel.TextSize = 16
+statusLabel.Font = Enum.Font.SourceSansBold
+statusLabel.Parent = screenGui
+
+local corner = Instance.new("UICorner")
+corner.CornerRadius = UDim.new(0, 6)
+corner.Parent = statusLabel
+
+-- Phase label under status
+local phaseLabel = Instance.new("TextLabel")
+phaseLabel.Name = "PhaseLabel"
+phaseLabel.Size = UDim2.new(0, 200, 0, 24)
+phaseLabel.Position = UDim2.new(1, -210, 0, 50)
+phaseLabel.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+phaseLabel.BackgroundTransparency = 0.3
+phaseLabel.BorderSizePixel = 0
+phaseLabel.Text = "Phase: farm (< 100k)"
+phaseLabel.TextColor3 = Color3.fromRGB(255, 200, 50)
+phaseLabel.TextSize = 13
+phaseLabel.Font = Enum.Font.SourceSans
+phaseLabel.Parent = screenGui
+
+local corner2 = Instance.new("UICorner")
+corner2.CornerRadius = UDim.new(0, 6)
+corner2.Parent = phaseLabel
+
+-- =========================
+-- GUI - PLAYER LIST (BOTTOM RIGHT)
+-- =========================
+local listFrame = Instance.new("Frame")
+listFrame.Name = "PlayerList"
+listFrame.Size = UDim2.new(0, 240, 0, 300)
+listFrame.Position = UDim2.new(1, -250, 1, -310)
+listFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+listFrame.BackgroundTransparency = 0.2
+listFrame.BorderSizePixel = 0
+listFrame.Parent = screenGui
+
+local listCorner = Instance.new("UICorner")
+listCorner.CornerRadius = UDim.new(0, 6)
+listCorner.Parent = listFrame
+
+local listTitle = Instance.new("TextLabel")
+listTitle.Size = UDim2.new(1, 0, 0, 28)
+listTitle.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+listTitle.BackgroundTransparency = 0.2
+listTitle.BorderSizePixel = 0
+listTitle.Text = "Players (by size)"
+listTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
+listTitle.TextSize = 14
+listTitle.Font = Enum.Font.SourceSansBold
+listTitle.Parent = listFrame
+
+local titleCorner = Instance.new("UICorner")
+titleCorner.CornerRadius = UDim.new(0, 6)
+titleCorner.Parent = listTitle
+
+local listScroll = Instance.new("ScrollingFrame")
+listScroll.Size = UDim2.new(1, -8, 1, -34)
+listScroll.Position = UDim2.new(0, 4, 0, 30)
+listScroll.BackgroundTransparency = 1
+listScroll.BorderSizePixel = 0
+listScroll.ScrollBarThickness = 4
+listScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+listScroll.Parent = listFrame
+
+local listLayout = Instance.new("UIListLayout")
+listLayout.SortOrder = Enum.SortOrder.LayoutOrder
+listLayout.Padding = UDim.new(0, 2)
+listLayout.Parent = listScroll
+
+-- =========================
+-- PLAYER LIST UPDATE
+-- =========================
+local playerButtons = {}
+
+local function isExcluded(plr)
+    if plr == player then return true end
+    if string.find(string.lower(plr.Name), "bartvanm") then return true end
+    if string.find(string.lower(plr.DisplayName), "bartvanm") then return true end
+    return false
+end
+
+local function formatSize(n)
+    if n >= 1000000 then
+        return string.format("%.1fM", n / 1000000)
+    elseif n >= 1000 then
+        return string.format("%.1fK", n / 1000)
+    end
+    return tostring(n)
+end
+
+local function updatePlayerList()
+    -- Gather valid players with sizes
+    local playerData = {}
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if not isExcluded(plr) then
+            table.insert(playerData, {
+                player = plr,
+                size = getPlayerSize(plr)
+            })
+        end
+    end
+
+    -- Sort by size descending
+    table.sort(playerData, function(a, b)
+        return a.size > b.size
+    end)
+
+    -- Auto-target = highest size player
+    if #playerData > 0 then
+        autoTarget = playerData[1].player
+    else
+        autoTarget = nil
+    end
+
+    -- Clear old buttons
+    for _, btn in pairs(playerButtons) do
+        btn:Destroy()
+    end
+    playerButtons = {}
+
+    -- Create buttons
+    for i, data in ipairs(playerData) do
+        local btn = Instance.new("TextButton")
+        btn.Size = UDim2.new(1, -4, 0, 26)
+        btn.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+        btn.BackgroundTransparency = 0.2
+        btn.BorderSizePixel = 0
+        btn.TextColor3 = Color3.fromRGB(220, 220, 220)
+        btn.TextSize = 13
+        btn.Font = Enum.Font.SourceSans
+        btn.TextXAlignment = Enum.TextXAlignment.Left
+        btn.LayoutOrder = i
+        btn.Parent = listScroll
+
+        local btnCorner = Instance.new("UICorner")
+        btnCorner.CornerRadius = UDim.new(0, 4)
+        btnCorner.Parent = btn
+
+        local currentTarget = getTarget()
+        local isTarget = (currentTarget == data.player)
+
+        if isTarget then
+            btn.BackgroundColor3 = Color3.fromRGB(180, 50, 50)
+            btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+        end
+
+        btn.Text = "  " .. data.player.DisplayName .. "  -  " .. formatSize(data.size)
+
+        btn.MouseButton1Click:Connect(function()
+            if selectedTarget == data.player then
+                -- Deselect (go back to auto)
+                selectedTarget = nil
+            else
+                selectedTarget = data.player
+            end
+        end)
+
+        table.insert(playerButtons, btn)
+    end
+
+    listScroll.CanvasSize = UDim2.new(0, 0, 0, #playerData * 28)
+end
+
+-- =========================
+-- FARM PHASE: AUTO GRAB + EAT
+-- =========================
+local farmRunning = false
+
+local function farmLoop()
+    if farmRunning then return end
+    farmRunning = true
+
+    task.spawn(function()
+        while botPhase == "farm" do
+            local mySize = getMySize()
+
+            if mySize >= FARM_SIZE_THRESHOLD then
+                botPhase = "bully"
+                phaseLabel.Text = "Phase: BULLY MODE"
+                phaseLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
+                botStatus = "targeting"
+                farmRunning = false
+                return
+            end
+
+            botStatus = "farming"
+            statusLabel.Text = "Status: farming (" .. formatSize(mySize) .. "/100K)"
+
+            -- Grab + eat
+            fireGrab()
+            fireEat()
+
+            -- Auto sell when max
+            pcall(function()
+                local sellGui = player.PlayerGui:FindFirstChild("ScreenGui")
+                if sellGui then
+                    local sellFrame = sellGui:FindFirstChild("Sell")
+                    if sellFrame then
+                        local sellText = sellFrame:FindFirstChild("SellText") or sellFrame:FindFirstChild("WarningText")
+                        if sellText and sellText.Visible then
+                            fireSell()
+                            task.wait(0.5)
+                        end
+                    end
+                end
+            end)
+
+            task.wait(0.01)
+        end
+        farmRunning = false
+    end)
+end
+
+-- =========================
+-- BULLY PHASE: TARGET + CHASE + GRAB + EAT/THROW
+-- =========================
+local PICKUP_ANIM_ID = "16493266847"
+
+local function isPickupAnimPlaying()
+    local char = player.Character
+    local humanoid = char and char:FindFirstChildOfClass("Humanoid")
+    if not humanoid then return false end
+    for _, track in ipairs(humanoid:GetPlayingAnimationTracks()) do
+        local anim = track.Animation
+        local animId = anim and anim.AnimationId or ""
+        if animId ~= "" and string.find(animId, PICKUP_ANIM_ID, 1, true) then
+            return true
+        end
+    end
+    return false
+end
+
+local function isHoldingSomething()
+    local char = player.Character
+    if not char then return false end
+    -- Check if there's a weld/attachment indicating holding
+    local hrp = getRoot()
+    if not hrp then return false end
+    for _, child in ipairs(char:GetDescendants()) do
+        if child:IsA("Weld") and child.Name == "PartGrab" then
+            return true
+        end
+    end
+    return isPickupAnimPlaying()
+end
+
+local function bullyLoop()
+    task.spawn(function()
+        while botPhase == "bully" do
+            local target = getTarget()
+            local targetRoot = target and getPlayerRoot(target)
+            local myRoot = getRoot()
+            local humanoid = getHumanoid()
+
+            if not target or not targetRoot or not myRoot or not humanoid then
+                botStatus = "no target"
+                statusLabel.Text = "Status: no target"
+                task.wait(0.5)
+                continue
+            end
+
+            local dist = (myRoot.Position - targetRoot.Position).Magnitude
+
+            -- Move towards the target
+            botStatus = "chasing " .. target.DisplayName
+            statusLabel.Text = "Status: chasing " .. target.DisplayName
+
+            if dist > 15 then
+                -- Walk towards target, slightly behind them
+                local targetLook = targetRoot.CFrame.LookVector
+                local behindPos = targetRoot.Position - targetLook * 5
+                humanoid:MoveTo(behindPos)
+
+                -- Face the target
+                pcall(function()
+                    myRoot.CFrame = CFrame.new(myRoot.Position, Vector3.new(targetRoot.Position.X, myRoot.Position.Y, targetRoot.Position.Z))
+                end)
+
+                task.wait(0.1)
+                continue
+            end
+
+            -- Close enough - position behind and grab
+            if dist <= 15 then
+                -- Face the target
+                pcall(function()
+                    myRoot.CFrame = CFrame.new(myRoot.Position, Vector3.new(targetRoot.Position.X, myRoot.Position.Y, targetRoot.Position.Z))
+                end)
+
+                botStatus = "grab"
+                statusLabel.Text = "Status: grab"
+                fireGrab()
+                task.wait(0.15)
+
+                -- Check if we picked something up
+                local grabStart = tick()
+                local grabbed = false
+                while tick() - grabStart < 1.5 do
+                    if isHoldingSomething() then
+                        grabbed = true
+                        break
+                    end
+                    fireGrab()
+                    task.wait(0.1)
+                end
+
+                if grabbed then
+                    botStatus = "hold player"
+                    statusLabel.Text = "Status: hold player"
+                    task.wait(0.2)
+
+                    -- Eat the grabbed player/part
+                    botStatus = "eating"
+                    statusLabel.Text = "Status: eating"
+                    for i = 1, 10 do
+                        fireEat()
+                        task.wait(0.05)
+                    end
+
+                    task.wait(0.3)
+                else
+                    -- Didn't grab - try throwing nearby parts at the target
+                    botStatus = "grab"
+                    statusLabel.Text = "Status: grab"
+
+                    -- Grab any nearby part
+                    fireGrab()
+                    task.wait(0.3)
+
+                    if isHoldingSomething() then
+                        botStatus = "hold"
+                        statusLabel.Text = "Status: hold"
+
+                        -- Face the target before throwing
+                        local targetRoot2 = getPlayerRoot(target)
+                        if targetRoot2 then
+                            pcall(function()
+                                local myRoot2 = getRoot()
+                                if myRoot2 then
+                                    myRoot2.CFrame = CFrame.new(myRoot2.Position, Vector3.new(targetRoot2.Position.X, myRoot2.Position.Y, targetRoot2.Position.Z))
+                                end
+                            end)
+                        end
+
+                        task.wait(0.1)
+                        fireThrow()
+                        task.wait(0.3)
+                    end
+                end
+            end
+
+            -- Also keep auto-selling if at max
+            pcall(function()
+                local sellGui = player.PlayerGui:FindFirstChild("ScreenGui")
+                if sellGui then
+                    local sellFrame = sellGui:FindFirstChild("Sell")
+                    if sellFrame then
+                        local sellText = sellFrame:FindFirstChild("SellText") or sellFrame:FindFirstChild("WarningText")
+                        if sellText and sellText.Visible then
+                            fireSell()
+                        end
+                    end
+                end
+            end)
+
+            task.wait(0.05)
+        end
+    end)
+end
+
+-- =========================
+-- MAIN UPDATE LOOP
+-- =========================
+task.spawn(function()
+    while true do
+        updatePlayerList()
+
+        -- Update status display
+        if botPhase == "farm" then
+            phaseLabel.Text = "Phase: farm (" .. formatSize(getMySize()) .. "/100K)"
+        end
+
+        task.wait(1)
+    end
+end)
+
+-- =========================
+-- START
+-- =========================
+if getMySize() >= FARM_SIZE_THRESHOLD then
+    botPhase = "bully"
+    phaseLabel.Text = "Phase: BULLY MODE"
+    phaseLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
+    bullyLoop()
+else
+    botPhase = "farm"
+    farmLoop()
+
+    -- Watch for phase transition
+    task.spawn(function()
+        while botPhase == "farm" do
+            task.wait(1)
+        end
+        if botPhase == "bully" then
+            bullyLoop()
+        end
+    end)
+end
