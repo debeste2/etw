@@ -172,6 +172,30 @@ local corner2 = Instance.new("UICorner")
 corner2.CornerRadius = UDim.new(0, 6)
 corner2.Parent = phaseLabel
 
+-- Server hop button
+local hopButton = Instance.new("TextButton")
+hopButton.Name = "HopButton"
+hopButton.Size = UDim2.new(0, 200, 0, 30)
+hopButton.Position = UDim2.new(1, -210, 0, 80)
+hopButton.BackgroundColor3 = Color3.fromRGB(50, 120, 200)
+hopButton.BorderSizePixel = 0
+hopButton.Text = "Join Another Server"
+hopButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+hopButton.TextSize = 14
+hopButton.Font = Enum.Font.SourceSansBold
+hopButton.Parent = screenGui
+
+local hopCorner = Instance.new("UICorner")
+hopCorner.CornerRadius = UDim.new(0, 6)
+hopCorner.Parent = hopButton
+
+hopButton.MouseButton1Click:Connect(function()
+    hopButton.Text = "Hopping..."
+    pcall(function()
+        RS.Events.RequestTeleport:FireServer("Normal")
+    end)
+end)
+
 -- =========================
 -- GUI - PLAYER LIST (BOTTOM RIGHT)
 -- =========================
@@ -400,9 +424,8 @@ local function bullyLoop()
             local target = getTarget()
             local targetRoot = target and getPlayerRoot(target)
             local myRoot = getRoot()
-            local humanoid = getHumanoid()
 
-            if not target or not targetRoot or not myRoot or not humanoid then
+            if not target or not targetRoot or not myRoot then
                 botStatus = "no target"
                 statusLabel.Text = "Status: no target"
                 task.wait(0.5)
@@ -411,27 +434,30 @@ local function bullyLoop()
 
             local dist = (myRoot.Position - targetRoot.Position).Magnitude
 
-            -- Move towards the target
-            botStatus = "chasing " .. target.DisplayName
-            statusLabel.Text = "Status: chasing " .. target.DisplayName
-
             if dist > 15 then
                 -- Walk towards target, slightly behind them
-                local targetLook = targetRoot.CFrame.LookVector
-                local behindPos = targetRoot.Position - targetLook * 5
-                humanoid:MoveTo(behindPos)
+                botStatus = "chasing " .. target.DisplayName
+                statusLabel.Text = "Status: chasing " .. target.DisplayName
 
-                -- Face the target
-                pcall(function()
-                    myRoot.CFrame = CFrame.new(myRoot.Position, Vector3.new(targetRoot.Position.X, myRoot.Position.Y, targetRoot.Position.Z))
-                end)
+                local humanoid = getHumanoid()
+                if humanoid then
+                    local targetLook = targetRoot.CFrame.LookVector
+                    local behindPos = targetRoot.Position - targetLook * 5
+                    humanoid:MoveTo(behindPos)
+                end
 
-                task.wait(0.1)
+                task.wait(0.2)
                 continue
             end
 
-            -- Close enough - position behind and grab
+            -- Close enough - face and grab
             if dist <= 15 then
+                -- Stop walking
+                local humanoid = getHumanoid()
+                if humanoid then
+                    humanoid:MoveTo(myRoot.Position)
+                end
+
                 -- Face the target
                 pcall(function()
                     myRoot.CFrame = CFrame.new(myRoot.Position, Vector3.new(targetRoot.Position.X, myRoot.Position.Y, targetRoot.Position.Z))
