@@ -134,22 +134,6 @@ local botPhase = "farm" -- "farm" or "bully"
 local botStatus = "idle"
 local selectedTarget = nil -- Player object (manual override)
 
-local function getBiggestOtherSize()
-    local biggest = 0
-    for _, plr in ipairs(Players:GetPlayers()) do
-        if not isExcluded(plr) then
-            local s = getPlayerSize(plr)
-            if s > biggest then biggest = s end
-        end
-    end
-    return biggest
-end
-
-local function shouldFarm()
-    local mySize = getMySize()
-    if mySize < FARM_MIN_SIZE then return true end
-    return mySize <= getBiggestOtherSize()
-end
 local autoTarget = nil    -- Player object (auto highest)
 
 local function getTarget()
@@ -336,6 +320,23 @@ local function isExcluded(plr)
     return false
 end
 
+local function getBiggestOtherSize()
+    local biggest = 0
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if not isExcluded(plr) then
+            local s = getPlayerSize(plr)
+            if s > biggest then biggest = s end
+        end
+    end
+    return biggest
+end
+
+local function shouldFarm()
+    local mySize = getMySize()
+    if mySize < FARM_MIN_SIZE then return true end
+    return mySize <= getBiggestOtherSize()
+end
+
 local function formatSize(n)
     if n >= 1000000 then
         return string.format("%.1fM", n / 1000000)
@@ -428,6 +429,9 @@ local function farmLoop()
     farmRunning = true
 
     task.spawn(function()
+        local lastSizeChangeTime = tick()
+        local lastSize = getMySize()
+
         while botPhase == "farm" do
             local mySize = getMySize()
 
@@ -437,7 +441,14 @@ local function farmLoop()
                 phaseLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
                 botStatus = "targeting"
                 farmRunning = false
+                updateToggleButton()
                 return
+            end
+
+            -- Track size changes
+            if mySize > lastSize then
+                lastSize = mySize
+                lastSizeChangeTime = tick()
             end
 
             local biggest = getBiggestOtherSize()
@@ -447,6 +458,28 @@ local function farmLoop()
             -- Grab + eat
             fireGrab()
             fireEat()
+
+            -- Walk to new spot if stuck (no size increase in 3 seconds)
+            if tick() - lastSizeChangeTime >= 3 then
+                local hrp = getRoot()
+                local humanoid = getHumanoid()
+                if hrp and humanoid then
+                    local randomDir = Vector3.new(
+                        math.random(-100, 100),
+                        0,
+                        math.random(-100, 100)
+                    ).Unit
+                    local walkTarget = clampToBedrock(hrp.Position + randomDir * 50)
+                    humanoid:MoveTo(walkTarget)
+                    task.wait(0.2)
+                    if humanoid then
+                        humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+                    end
+                    task.wait(1.8)
+                    humanoid:MoveTo(hrp.Position)
+                    lastSizeChangeTime = tick()
+                end
+            end
 
             -- Auto sell when max
             pcall(function()
