@@ -550,11 +550,10 @@ local function isTargetHeld(target)
     return false
 end
 
--- Get follow distance based on our size (bigger = more distance behind)
+-- Get follow distance based on our size (bigger = stay a bit further back)
 local function getFollowDistance()
     local mySize = getMySize()
-    -- Base distance 10, scales up with size
-    return math.clamp(10 + mySize / 5000, 10, 80)
+    return math.clamp(3 + mySize / 20000, 3, 15)
 end
 
 -- Clamp a position inside workspace.Map.Bedrock bounds
@@ -586,6 +585,16 @@ local function clampToBedrock(pos)
     return pos
 end
 
+-- =========================
+-- ALWAYS AUTO-EAT
+-- =========================
+task.spawn(function()
+    while true do
+        fireEat()
+        task.wait(0.01)
+    end
+end)
+
 local function bullyLoop()
     task.spawn(function()
         while botPhase == "bully" do
@@ -601,23 +610,26 @@ local function bullyLoop()
             end
 
             local dist = (myRoot.Position - targetRoot.Position).Magnitude
-            local followDist = getFollowDistance()
-            local grabRange = followDist + 5
+            local grabRange = 10
 
             if dist > grabRange then
-                -- Walk towards target, behind them based on our size
+                -- Walk directly towards the target
                 botStatus = "chasing " .. target.DisplayName
                 statusLabel.Text = "Status: chasing " .. target.DisplayName
 
                 local humanoid = getHumanoid()
                 if humanoid then
-                    local targetLook = targetRoot.CFrame.LookVector
-                    local behindPos = targetRoot.Position - targetLook * followDist
-                    behindPos = clampToBedrock(behindPos)
-                    humanoid:MoveTo(behindPos)
+                    -- Move directly to the target's position
+                    local movePos = clampToBedrock(targetRoot.Position)
+                    humanoid:MoveTo(movePos)
                 end
 
-                task.wait(0.2)
+                -- Keep facing the target while walking
+                pcall(function()
+                    myRoot.CFrame = CFrame.new(myRoot.Position, Vector3.new(targetRoot.Position.X, myRoot.Position.Y, targetRoot.Position.Z))
+                end)
+
+                task.wait(0.1)
                 continue
             end
 
@@ -627,35 +639,35 @@ local function bullyLoop()
                 humanoid:MoveTo(myRoot.Position)
             end
 
-            -- Face the target
-            pcall(function()
-                myRoot.CFrame = CFrame.new(myRoot.Position, Vector3.new(targetRoot.Position.X, myRoot.Position.Y, targetRoot.Position.Z))
-            end)
-
             botStatus = "grab"
             statusLabel.Text = "Status: grab"
-            fireGrab()
-            task.wait(0.15)
 
-            -- Check if we're holding the target player (they're off the ground)
+            -- Continuously face target and spam grab until we catch something
             local holdStart = tick()
             local holdingTarget = false
-            while tick() - holdStart < 1.5 do
+            while tick() - holdStart < 2 do
+                -- Re-fetch target position each iteration
+                local tRoot = getPlayerRoot(target)
+                local mRoot = getRoot()
+                if tRoot and mRoot then
+                    pcall(function()
+                        mRoot.CFrame = CFrame.new(mRoot.Position, Vector3.new(tRoot.Position.X, mRoot.Position.Y, tRoot.Position.Z))
+                    end)
+                end
+
+                fireGrab()
+
                 if isTargetHeld(target) then
                     holdingTarget = true
                     break
                 end
                 if isHoldingSomething() then
-                    -- Holding something, check if it's the player
                     if isTargetHeld(target) then
                         holdingTarget = true
-                        break
                     end
-                    -- Might be holding a part instead
                     break
                 end
-                fireGrab()
-                task.wait(0.1)
+                task.wait(0.05)
             end
 
             if holdingTarget then
