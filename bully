@@ -619,40 +619,29 @@ local function bullyLoop()
 
                 local humanoid = getHumanoid()
                 if humanoid then
-                    -- Move directly to the target's position
                     local movePos = clampToBedrock(targetRoot.Position)
                     humanoid:MoveTo(movePos)
                 end
-
-                -- Keep facing the target while walking
-                pcall(function()
-                    myRoot.CFrame = CFrame.new(myRoot.Position, Vector3.new(targetRoot.Position.X, myRoot.Position.Y, targetRoot.Position.Z))
-                end)
 
                 task.wait(0.1)
                 continue
             end
 
-            -- Close enough - stop, face, and grab
-            local humanoid = getHumanoid()
-            if humanoid then
-                humanoid:MoveTo(myRoot.Position)
-            end
-
+            -- Close enough - keep walking at them and spam grab
             botStatus = "grab"
             statusLabel.Text = "Status: grab"
 
-            -- Continuously face target and spam grab until we catch something
             local holdStart = tick()
             local holdingTarget = false
             while tick() - holdStart < 2 do
-                -- Re-fetch target position each iteration
                 local tRoot = getPlayerRoot(target)
                 local mRoot = getRoot()
-                if tRoot and mRoot then
-                    pcall(function()
-                        mRoot.CFrame = CFrame.new(mRoot.Position, Vector3.new(tRoot.Position.X, mRoot.Position.Y, tRoot.Position.Z))
-                    end)
+                local hum = getHumanoid()
+
+                if tRoot and mRoot and hum then
+                    -- Keep walking into the target while grabbing
+                    local movePos = clampToBedrock(tRoot.Position)
+                    hum:MoveTo(movePos)
                 end
 
                 fireGrab()
@@ -699,15 +688,11 @@ local function bullyLoop()
                 botStatus = "hold"
                 statusLabel.Text = "Status: hold"
 
-                -- Face the target before throwing
+                -- Walk toward target before throwing
+                local humanoid = getHumanoid()
                 local targetRoot2 = getPlayerRoot(target)
-                if targetRoot2 then
-                    pcall(function()
-                        local myRoot2 = getRoot()
-                        if myRoot2 then
-                            myRoot2.CFrame = CFrame.new(myRoot2.Position, Vector3.new(targetRoot2.Position.X, myRoot2.Position.Y, targetRoot2.Position.Z))
-                        end
-                    end)
+                if humanoid and targetRoot2 then
+                    humanoid:MoveTo(targetRoot2.Position)
                 end
 
                 task.wait(0.1)
