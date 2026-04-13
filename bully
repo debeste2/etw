@@ -46,7 +46,21 @@ local function getMySize()
     return 0
 end
 
+local sizeOverrides = {} -- UserId -> overridden size (0 after eating them)
+
 local function getPlayerSize(plr)
+    if sizeOverrides[plr.UserId] ~= nil then
+        -- Clear override once leaderboard catches up (shows 0 or lower)
+        local ls = plr:FindFirstChild("leaderstats")
+        if ls then
+            local s = ls:FindFirstChild("Size")
+            if s and s.Value <= sizeOverrides[plr.UserId] then
+                sizeOverrides[plr.UserId] = nil
+                return s.Value
+            end
+        end
+        return sizeOverrides[plr.UserId]
+    end
     local ls = plr:FindFirstChild("leaderstats")
     if ls then
         local s = ls:FindFirstChild("Size")
@@ -115,10 +129,27 @@ end
 -- =========================
 -- STATE
 -- =========================
-local FARM_SIZE_THRESHOLD = 100000
+local FARM_MIN_SIZE = 50000
 local botPhase = "farm" -- "farm" or "bully"
 local botStatus = "idle"
 local selectedTarget = nil -- Player object (manual override)
+
+local function getBiggestOtherSize()
+    local biggest = 0
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if not isExcluded(plr) then
+            local s = getPlayerSize(plr)
+            if s > biggest then biggest = s end
+        end
+    end
+    return biggest
+end
+
+local function shouldFarm()
+    local mySize = getMySize()
+    if mySize < FARM_MIN_SIZE then return true end
+    return mySize <= getBiggestOtherSize()
+end
 local autoTarget = nil    -- Player object (auto highest)
 
 local function getTarget()
@@ -194,6 +225,58 @@ hopButton.MouseButton1Click:Connect(function()
     pcall(function()
         RS.Events.RequestTeleport:FireServer("Normal")
     end)
+end)
+
+-- Toggle farm/bully button
+local toggleButton = Instance.new("TextButton")
+toggleButton.Name = "ToggleButton"
+toggleButton.Size = UDim2.new(0, 200, 0, 30)
+toggleButton.Position = UDim2.new(1, -210, 0, 116)
+toggleButton.BackgroundColor3 = Color3.fromRGB(50, 160, 80)
+toggleButton.BorderSizePixel = 0
+toggleButton.Text = "Switch to Farm"
+toggleButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+toggleButton.TextSize = 14
+toggleButton.Font = Enum.Font.SourceSansBold
+toggleButton.Parent = screenGui
+
+local toggleCorner = Instance.new("UICorner")
+toggleCorner.CornerRadius = UDim.new(0, 6)
+toggleCorner.Parent = toggleButton
+
+local function updateToggleButton()
+    if botPhase == "bully" then
+        toggleButton.Text = "Switch to Farm"
+        toggleButton.BackgroundColor3 = Color3.fromRGB(50, 160, 80)
+    else
+        toggleButton.Text = "Switch to Bully"
+        toggleButton.BackgroundColor3 = Color3.fromRGB(180, 50, 50)
+    end
+end
+
+toggleButton.MouseButton1Click:Connect(function()
+    if botPhase == "bully" then
+        botPhase = "farm"
+        phaseLabel.Text = "Phase: farm"
+        phaseLabel.TextColor3 = Color3.fromRGB(255, 200, 50)
+        updateToggleButton()
+        farmLoop()
+        task.spawn(function()
+            while botPhase == "farm" do
+                task.wait(1)
+            end
+            if botPhase == "bully" then
+                updateToggleButton()
+                bullyLoop()
+            end
+        end)
+    else
+        botPhase = "bully"
+        phaseLabel.Text = "Phase: BULLY MODE"
+        phaseLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
+        updateToggleButton()
+        bullyLoop()
+    end
 end)
 
 -- =========================
@@ -348,7 +431,7 @@ local function farmLoop()
         while botPhase == "farm" do
             local mySize = getMySize()
 
-            if mySize >= FARM_SIZE_THRESHOLD then
+            if not shouldFarm() then
                 botPhase = "bully"
                 phaseLabel.Text = "Phase: BULLY MODE"
                 phaseLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
@@ -357,8 +440,9 @@ local function farmLoop()
                 return
             end
 
+            local biggest = getBiggestOtherSize()
             botStatus = "farming"
-            statusLabel.Text = "Status: farming (" .. formatSize(mySize) .. "/100K)"
+            statusLabel.Text = "Status: farming (" .. formatSize(mySize) .. "/" .. formatSize(math.max(FARM_MIN_SIZE, biggest)) .. ")"
 
             -- Grab + eat
             fireGrab()
@@ -407,7 +491,6 @@ end
 local function isHoldingSomething()
     local char = player.Character
     if not char then return false end
-    -- Check if there's a weld/attachment indicating holding
     local hrp = getRoot()
     if not hrp then return false end
     for _, child in ipairs(char:GetDescendants()) do
@@ -416,6 +499,58 @@ local function isHoldingSomething()
         end
     end
     return isPickupAnimPlaying()
+end
+
+-- Check if target player is lifted off ground (we're holding them)
+local function isTargetHeld(target)
+    local targetRoot = getPlayerRoot(target)
+    if not targetRoot then return false end
+    -- Raycast down from target to find ground distance
+    local rayParams = RaycastParams.new()
+    rayParams.FilterType = Enum.RaycastFilterType.Exclude
+    rayParams.FilterDescendantsInstances = {target.Character, player.Character}
+    local result = workspace:Raycast(targetRoot.Position, Vector3.new(0, -500, 0), rayParams)
+    if result then
+        local groundDist = (targetRoot.Position - result.Position).Magnitude
+        return groundDist > 20
+    end
+    return false
+end
+
+-- Get follow distance based on our size (bigger = more distance behind)
+local function getFollowDistance()
+    local mySize = getMySize()
+    -- Base distance 10, scales up with size
+    return math.clamp(10 + mySize / 5000, 10, 80)
+end
+
+-- Clamp a position inside workspace.Map.Bedrock bounds
+local function clampToBedrock(pos)
+    local ok, result = pcall(function()
+        local bedrock = workspace:FindFirstChild("Map") and workspace.Map:FindFirstChild("Bedrock")
+        if not bedrock then return pos end
+        -- Get bounding box of bedrock
+        local cf, size
+        if bedrock:IsA("BasePart") then
+            cf = bedrock.CFrame
+            size = bedrock.Size
+        elseif bedrock:IsA("Model") then
+            cf, size = bedrock:GetBoundingBox()
+        else
+            return pos
+        end
+        local halfSize = size / 2
+        -- Convert position to bedrock local space, clamp, convert back
+        local localPos = cf:PointToObjectSpace(pos)
+        local clamped = Vector3.new(
+            math.clamp(localPos.X, -halfSize.X + 5, halfSize.X - 5),
+            localPos.Y,
+            math.clamp(localPos.Z, -halfSize.Z + 5, halfSize.Z - 5)
+        )
+        return cf:PointToWorldSpace(clamped)
+    end)
+    if ok then return result end
+    return pos
 end
 
 local function bullyLoop()
@@ -433,16 +568,19 @@ local function bullyLoop()
             end
 
             local dist = (myRoot.Position - targetRoot.Position).Magnitude
+            local followDist = getFollowDistance()
+            local grabRange = followDist + 5
 
-            if dist > 15 then
-                -- Walk towards target, slightly behind them
+            if dist > grabRange then
+                -- Walk towards target, behind them based on our size
                 botStatus = "chasing " .. target.DisplayName
                 statusLabel.Text = "Status: chasing " .. target.DisplayName
 
                 local humanoid = getHumanoid()
                 if humanoid then
                     local targetLook = targetRoot.CFrame.LookVector
-                    local behindPos = targetRoot.Position - targetLook * 5
+                    local behindPos = targetRoot.Position - targetLook * followDist
+                    behindPos = clampToBedrock(behindPos)
                     humanoid:MoveTo(behindPos)
                 end
 
@@ -450,79 +588,86 @@ local function bullyLoop()
                 continue
             end
 
-            -- Close enough - face and grab
-            if dist <= 15 then
-                -- Stop walking
-                local humanoid = getHumanoid()
-                if humanoid then
-                    humanoid:MoveTo(myRoot.Position)
+            -- Close enough - stop, face, and grab
+            local humanoid = getHumanoid()
+            if humanoid then
+                humanoid:MoveTo(myRoot.Position)
+            end
+
+            -- Face the target
+            pcall(function()
+                myRoot.CFrame = CFrame.new(myRoot.Position, Vector3.new(targetRoot.Position.X, myRoot.Position.Y, targetRoot.Position.Z))
+            end)
+
+            botStatus = "grab"
+            statusLabel.Text = "Status: grab"
+            fireGrab()
+            task.wait(0.15)
+
+            -- Check if we're holding the target player (they're off the ground)
+            local holdStart = tick()
+            local holdingTarget = false
+            while tick() - holdStart < 1.5 do
+                if isTargetHeld(target) then
+                    holdingTarget = true
+                    break
                 end
-
-                -- Face the target
-                pcall(function()
-                    myRoot.CFrame = CFrame.new(myRoot.Position, Vector3.new(targetRoot.Position.X, myRoot.Position.Y, targetRoot.Position.Z))
-                end)
-
-                botStatus = "grab"
-                statusLabel.Text = "Status: grab"
-                fireGrab()
-                task.wait(0.15)
-
-                -- Check if we picked something up
-                local grabStart = tick()
-                local grabbed = false
-                while tick() - grabStart < 1.5 do
-                    if isHoldingSomething() then
-                        grabbed = true
+                if isHoldingSomething() then
+                    -- Holding something, check if it's the player
+                    if isTargetHeld(target) then
+                        holdingTarget = true
                         break
                     end
-                    fireGrab()
-                    task.wait(0.1)
+                    -- Might be holding a part instead
+                    break
+                end
+                fireGrab()
+                task.wait(0.1)
+            end
+
+            if holdingTarget then
+                -- We grabbed the target player - eat them
+                botStatus = "hold player"
+                statusLabel.Text = "Status: hold player"
+                task.wait(0.1)
+
+                local sizeBeforeEat = getMySize()
+
+                botStatus = "eating"
+                statusLabel.Text = "Status: eating"
+                -- Spam eat until they're no longer held
+                local eatStart = tick()
+                while tick() - eatStart < 3 do
+                    fireEat()
+                    if not isTargetHeld(target) and not isHoldingSomething() then
+                        break
+                    end
+                    task.wait(0.05)
                 end
 
-                if grabbed then
-                    botStatus = "hold player"
-                    statusLabel.Text = "Status: hold player"
-                    task.wait(0.2)
+                -- If our size increased, we ate them - override their size to 0
+                if getMySize() > sizeBeforeEat and target and target.Parent == Players then
+                    sizeOverrides[target.UserId] = 0
+                end
+            elseif isHoldingSomething() then
+                -- Holding a part, not the player - throw it at them
+                botStatus = "hold"
+                statusLabel.Text = "Status: hold"
 
-                    -- Eat the grabbed player/part
-                    botStatus = "eating"
-                    statusLabel.Text = "Status: eating"
-                    for i = 1, 10 do
-                        fireEat()
-                        task.wait(0.05)
-                    end
-
-                    task.wait(0.3)
-                else
-                    -- Didn't grab - try throwing nearby parts at the target
-                    botStatus = "grab"
-                    statusLabel.Text = "Status: grab"
-
-                    -- Grab any nearby part
-                    fireGrab()
-                    task.wait(0.3)
-
-                    if isHoldingSomething() then
-                        botStatus = "hold"
-                        statusLabel.Text = "Status: hold"
-
-                        -- Face the target before throwing
-                        local targetRoot2 = getPlayerRoot(target)
-                        if targetRoot2 then
-                            pcall(function()
-                                local myRoot2 = getRoot()
-                                if myRoot2 then
-                                    myRoot2.CFrame = CFrame.new(myRoot2.Position, Vector3.new(targetRoot2.Position.X, myRoot2.Position.Y, targetRoot2.Position.Z))
-                                end
-                            end)
+                -- Face the target before throwing
+                local targetRoot2 = getPlayerRoot(target)
+                if targetRoot2 then
+                    pcall(function()
+                        local myRoot2 = getRoot()
+                        if myRoot2 then
+                            myRoot2.CFrame = CFrame.new(myRoot2.Position, Vector3.new(targetRoot2.Position.X, myRoot2.Position.Y, targetRoot2.Position.Z))
                         end
-
-                        task.wait(0.1)
-                        fireThrow()
-                        task.wait(0.3)
-                    end
+                    end)
                 end
+
+                task.wait(0.1)
+                fireThrow()
+                task.wait(0.3)
             end
 
             -- Also keep auto-selling if at max
@@ -553,7 +698,8 @@ task.spawn(function()
 
         -- Update status display
         if botPhase == "farm" then
-            phaseLabel.Text = "Phase: farm (" .. formatSize(getMySize()) .. "/100K)"
+            local biggest = getBiggestOtherSize()
+            phaseLabel.Text = "Phase: farm (" .. formatSize(getMySize()) .. "/" .. formatSize(math.max(FARM_MIN_SIZE, biggest)) .. ")"
         end
 
         task.wait(1)
@@ -563,7 +709,7 @@ end)
 -- =========================
 -- START
 -- =========================
-if getMySize() >= FARM_SIZE_THRESHOLD then
+if not shouldFarm() then
     botPhase = "bully"
     phaseLabel.Text = "Phase: BULLY MODE"
     phaseLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
