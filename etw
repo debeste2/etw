@@ -463,6 +463,8 @@ end)
 -- =========================
 local autoEating = false
 local autoGrabbing = false
+local lastGrabTime = 0
+local GRAB_INTERVAL = 0.5 -- seconds between grab fires
 
 local function startAutoEat()
     if autoEating then return end
@@ -494,6 +496,7 @@ end
 
 local function doGrab()
     if not autoGrabbing then return end
+    if tick() - lastGrabTime < GRAB_INTERVAL then return end
     
     pcall(function()
         local char = player.Character
@@ -503,6 +506,7 @@ local function doGrab()
                 local grabEvent = events:FindFirstChild("Grab")
                 if grabEvent then
                     grabEvent:FireServer(false, false, false)
+                    lastGrabTime = tick()
                 end
             end
         end
@@ -834,8 +838,9 @@ local function mainLoop()
                                     local grabEvent = events:FindFirstChild("Grab")
                                     local eatEvent = events:FindFirstChild("Eat")
                                     
-                                    if grabEvent then
+                                    if grabEvent and tick() - lastGrabTime >= GRAB_INTERVAL then
                                         grabEvent:FireServer(false, false, false)
+                                        lastGrabTime = tick()
                                     end
                                     
                                     if eatEvent then
