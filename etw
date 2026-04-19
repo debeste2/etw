@@ -153,7 +153,8 @@ local stats = {
     currentSize = 0,
     sizeLevel = 0,
     multiplierLevel = 0,
-    speedLevel = 0
+    speedLevel = 0,
+    timesStuck = 0
 }
 
 -- Statistics GUI
@@ -197,6 +198,7 @@ local function updateStats()
     
     statsText.Text = string.format([[Time Played: %dh %dm %ds
 Times Sold: %d
+Times Stuck: %d
 Current Cubes: %s
 Next Upgrade: %s
 Max Size: %d
@@ -207,6 +209,7 @@ Levels:
   Speed: %d]], 
         hours, minutes, seconds,
         stats.timesSold,
+        stats.timesStuck,
         tostring(stats.currentCubes),
         stats.nextUpgrade,
         stats.maxSize,
@@ -720,6 +723,7 @@ local function mainLoop()
                         -- If stuck (no size increase for 10 seconds), move to next position
                         if not pendingSell and tick() - lastSizeChangeTime >= 10 then
                             print("[Bot] Stuck - no size change for 10s, moving to next position")
+                            stats.timesStuck = stats.timesStuck + 1
                             autoGrabbing = false
                             break
                         end
