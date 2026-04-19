@@ -675,6 +675,12 @@ local function mainLoop()
                     end
                     
                     while true do
+                        -- Apply downward momentum every frame
+                        local hrp = getRoot()
+                        if hrp then
+                            hrp.AssemblyLinearVelocity = Vector3.new(0, -500, 0)
+                        end
+                        
                         -- Update stats and try upgrades every frame
                         tryUpgrade()
                         updateStats()
