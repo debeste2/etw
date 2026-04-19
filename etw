@@ -656,20 +656,8 @@ local function mainLoop()
                 local hrp = getRoot()
                 if hrp then
                     hrp.CFrame = CFrame.new(x, 59, currentZ)
-                    hrp.AssemblyLinearVelocity = Vector3.zero
+                    hrp.AssemblyLinearVelocity = Vector3.new(0, -500, 0)
                     hrp.AssemblyAngularVelocity = Vector3.zero
-                    
-                    -- Apply downward momentum for 1 full second
-                    local momentumStart = tick()
-                    while tick() - momentumStart < 1 do
-                        local hrp = getRoot()
-                        if hrp then
-                            hrp.CFrame = CFrame.new(x, 59, currentZ)
-                            hrp.AssemblyLinearVelocity = Vector3.new(0, -150, 0)
-                            hrp.AssemblyAngularVelocity = Vector3.zero
-                        end
-                        task.wait(0.05)
-                    end
                     
                     -- Re-enable autoGrab and autoEat
                     autoGrabbing = true
