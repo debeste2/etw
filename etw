@@ -655,6 +655,10 @@ local function mainLoop()
             for x = -1331, 1349, 336 do
                 local hrp = getRoot()
                 if hrp then
+                    -- Disable autoGrab and autoEat during teleport
+                    autoGrabbing = false
+                    autoEating = false
+                    
                     hrp.CFrame = CFrame.new(x, 59, currentZ)
                     
                     -- Apply downward momentum for 1 full second
