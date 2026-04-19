@@ -147,14 +147,14 @@ end
 local stats = {
     startTime = tick(),
     timesSold = 0,
+    timesStuck = 0,
     currentCubes = 0,
     nextUpgrade = "Calculating...",
     maxSize = 0,
     currentSize = 0,
     sizeLevel = 0,
     multiplierLevel = 0,
-    speedLevel = 0,
-    timesStuck = 0
+    speedLevel = 0
 }
 
 -- Statistics GUI
